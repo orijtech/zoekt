@@ -26,6 +26,7 @@ import (
 	"go.uber.org/automaxprocs/maxprocs"
 	"golang.org/x/net/trace"
 
+	"github.com/google/zoekt"
 	"github.com/google/zoekt/build"
 	retryablehttp "github.com/hashicorp/go-retryablehttp"
 	"github.com/keegancsmith/tmpfriend"
@@ -194,7 +195,9 @@ func (s *Server) Run() {
 		start := time.Now()
 		args := s.defaultArgs()
 		args.Name = name
-		args.Commit = commit
+		if commit != "" {
+			args.Branches = []zoekt.RepositoryBranch{{Name: "HEAD", Version: commit}}
+		}
 		state, err := s.Index(args)
 		metricIndexDuration.WithLabelValues(string(state)).Observe(time.Since(start).Seconds())
 		if err != nil {
@@ -222,9 +225,9 @@ func (s *Server) Index(args *indexArgs) (state indexState, err error) {
 		tr.Finish()
 	}()
 
-	tr.LazyPrintf("commit: %v", args.Commit)
+	tr.LazyPrintf("branches: %v", args.Branches)
 
-	if args.Commit == "" {
+	if len(args.Branches) == 0 {
 		return indexStateEmpty, s.createEmptyShard(tr, args.Name)
 	}
 
@@ -256,7 +259,6 @@ func (s *Server) defaultArgs() *indexArgs {
 		Parallelism: s.CPUCount,
 
 		Incremental: true,
-		Branch:      "HEAD",
 
 		// 1 MB; match https://sourcegraph.sgdev.org/github.com/sourcegraph/sourcegraph/-/blob/cmd/symbols/internal/symbols/search.go#L22
 		FileLimit: 1 << 20,
@@ -333,7 +335,9 @@ func (s *Server) forceIndex(name string) (string, error) {
 	}
 	args := s.defaultArgs()
 	args.Name = name
-	args.Commit = commit
+	if commit != "" {
+		args.Branches = []zoekt.RepositoryBranch{{Name: "HEAD", Version: commit}}
+	}
 	args.Incremental = false // force re-index
 	state, err := s.Index(args)
 	if err != nil {
