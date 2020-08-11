@@ -177,6 +177,11 @@ func NewMux(s *Server) (*http.ServeMux, error) {
 }
 
 func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Accept") == "text/event-stream" {
+		s.serveSearchStream(w, r)
+		return
+	}
+
 	err := s.serveSearchErr(w, r)
 
 	if suggest, ok := err.(*query.SuggestQueryError); ok {
@@ -191,6 +196,123 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusTeapot)
+	}
+}
+
+func (s *Server) serveSearchStream(w http.ResponseWriter, r *http.Request) {
+	searcher, ok := s.Searcher.(zoekt.StreamSearcher)
+	if !ok {
+		// This is a 500 since s.Searcher should support streaming. The only
+		// reason it wouldn't is if we had a bad middleware.
+		http.Error(w, "stream search not supported: "+s.Searcher.String(), http.StatusInternalServerError)
+		return
+	}
+
+	eventWriter, err := newEventStreamWriter(w)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	qvals := r.URL.Query()
+	queryStr := qvals.Get("q")
+	if queryStr == "" {
+		http.Error(w, "no query found", http.StatusBadRequest)
+		return
+	}
+	q, err := query.Parse(queryStr)
+	if err != nil {
+		http.Error(w, "error parsing query: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// TODO(keegan) specify opts
+	opts := zoekt.SearchOptions{
+		MaxWallTime: 10 * time.Second,
+	}
+	opts.SetDefaults()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	writeEvent := func(typ string, data interface{}) {
+		err := eventWriter.Event(typ, data)
+		if err != nil {
+			// error is almost certainly EOF, so just cancel further searching
+			cancel()
+		}
+	}
+
+	events := searcher.StreamSearch(ctx, q, &opts)
+
+	lastStats := time.Now()
+	var stats zoekt.Stats
+	const filematchesChunk = 1000
+	filematchesBuf := make([]eventFileMatch, filematchesChunk)
+
+	for {
+		var event zoekt.StreamSearchEvent
+		select {
+		case <-ctx.Done():
+			// drain
+			go func() {
+				for range events {
+				}
+			}()
+			return
+
+		case ev, ok := <-events:
+			if !ok {
+				writeEvent("done", stats)
+				return
+			}
+			event = ev
+		}
+
+		if event.SearchResult != nil {
+			stats.Add(event.SearchResult.Stats)
+			// Write upto 1000 events at a time
+			files := event.SearchResult.Files
+			for len(files) > 0 {
+				l := filematchesChunk
+				if l > len(files) {
+					l = len(files)
+				}
+				for i, fm := range files[:l] {
+					lineMatches := make([]eventLineMatch, 0, len(fm.LineMatches))
+					for _, lm := range fm.LineMatches {
+						lineFragments := make([][2]int, 0, len(lm.LineFragments))
+						for _, lf := range lm.LineFragments {
+							lineFragments = append(lineFragments, [2]int{lf.LineOffset, lf.MatchLength})
+						}
+						lineMatches = append(lineMatches, eventLineMatch{
+							Line:             string(lm.Line),
+							LineNumber:       lm.LineNumber,
+							OffsetAndLengths: lineFragments,
+						})
+					}
+					filematchesBuf[i] = eventFileMatch{
+						Path:        fm.FileName,
+						Repository:  fm.Repository,
+						Branches:    fm.Branches,
+						Version:     fm.Version,
+						LineMatches: lineMatches,
+					}
+				}
+				writeEvent("filematches", filematchesBuf[:l])
+				files = files[l:]
+			}
+		} else if event.Error != nil {
+			writeEvent("error", event.Error.Error())
+			cancel()
+		} else if event.Log != "" {
+			writeEvent("log", event.Log)
+		}
+
+		if time.Since(lastStats) > 500*time.Millisecond {
+			writeEvent("stats", stats)
+			lastStats = time.Now()
+		}
 	}
 }
 

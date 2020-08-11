@@ -132,6 +132,9 @@ type Stats struct {
 	// Shards that we did not process because a query was canceled.
 	ShardsSkipped int
 
+	// Number of shards that we considered.
+	ShardsConsidered int
+
 	// Number of non-overlapping matches
 	MatchCount int
 
@@ -154,6 +157,7 @@ func (s *Stats) Add(o Stats) {
 	s.NgramMatches += o.NgramMatches
 	s.ShardFilesConsidered += o.ShardFilesConsidered
 	s.ShardsSkipped += o.ShardsSkipped
+	s.ShardsConsidered += o.ShardsConsidered
 }
 
 // SearchResult contains search matches and extra data
@@ -285,6 +289,31 @@ type Searcher interface {
 
 	// Describe the searcher for debug messages.
 	String() string
+}
+
+// StreamSearcher is an optional interface which sends results over a channel
+// as they are found.
+//
+// This is a Sourcegraph extension.
+type StreamSearcher interface {
+	Searcher
+
+	// StreamSearch returns a channel which needs to be read until closed.
+	StreamSearch(ctx context.Context, q query.Q, opts *SearchOptions) <-chan StreamSearchEvent
+}
+
+// StreamSearchEvent has fields optionally set representing events that happen
+// during a search.
+//
+// This is a Sourcegraph extension.
+type StreamSearchEvent struct {
+	// SearchResult is non-nil if this event is a search result. These should be
+	// combined with previous and later SearchResults.
+	SearchResult *SearchResult
+	// Error indicates an error was encountered.
+	Error error
+	// Log is a debug message
+	Log string
 }
 
 type SearchOptions struct {

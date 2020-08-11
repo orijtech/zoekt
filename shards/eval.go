@@ -13,7 +13,25 @@ import (
 // to the underlying searcher. We need to evaluate type:repo queries first
 // since they need to do cross shard operations.
 type typeRepoSearcher struct {
-	zoekt.Searcher
+	Searcher zoekt.StreamSearcher
+}
+
+func (s *typeRepoSearcher) StreamSearch(ctx context.Context, q query.Q, opts *zoekt.SearchOptions) <-chan zoekt.StreamSearchEvent {
+	tr := trace.New("typeRepoSearcher.StreamSearch", "")
+	tr.LazyLog(q, true)
+	tr.LazyPrintf("opts: %+v", opts)
+	// TODO stats?
+	defer tr.Finish()
+
+	q, err := s.eval(ctx, q)
+	if err != nil {
+		c := make(chan zoekt.StreamSearchEvent, 1)
+		c <- zoekt.StreamSearchEvent{Error: err}
+		close(c)
+		return c
+	}
+
+	return s.Searcher.StreamSearch(ctx, q, opts)
 }
 
 func (s *typeRepoSearcher) Search(ctx context.Context, q query.Q, opts *zoekt.SearchOptions) (sr *zoekt.SearchResult, err error) {
@@ -88,4 +106,12 @@ func (s *typeRepoSearcher) eval(ctx context.Context, q query.Q) (query.Q, error)
 		return rs
 	})
 	return q, err
+}
+
+func (s *typeRepoSearcher) String() string {
+	return "typeRepoSearcher{" + s.Searcher.String() + "}"
+}
+
+func (s *typeRepoSearcher) Close() {
+	s.Searcher.Close()
 }

@@ -94,6 +94,8 @@ func (d *indexData) Search(ctx context.Context, q query.Q, opts *SearchOptions) 
 	default:
 	}
 
+	res.Stats.ShardsConsidered++
+
 	tr := trace.New("indexData.Search", d.file.Name())
 	tr.LazyPrintf("opts: %+v", opts)
 	defer func() {

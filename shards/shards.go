@@ -157,7 +157,7 @@ func newShardedSearcher(n int64) *shardedSearcher {
 
 // NewDirectorySearcher returns a searcher instance that loads all
 // shards corresponding to a glob into memory.
-func NewDirectorySearcher(dir string) (zoekt.Searcher, error) {
+func NewDirectorySearcher(dir string) (zoekt.StreamSearcher, error) {
 	ss := newShardedSearcher(int64(runtime.GOMAXPROCS(0)))
 	tl := &loader{
 		ss: ss,
@@ -412,6 +412,108 @@ func (ss *shardedSearcher) Search(ctx context.Context, q query.Q, opts *zoekt.Se
 
 	aggregate.Duration = time.Since(start)
 	return aggregate, nil
+}
+
+func (ss *shardedSearcher) StreamSearch(ctx context.Context, q query.Q, opts *zoekt.SearchOptions) <-chan zoekt.StreamSearchEvent {
+	events := make(chan zoekt.StreamSearchEvent)
+	go ss.streamSearch(ctx, q, opts, events)
+	return events
+}
+
+// streamSearch takes ownership of events and will close it when done.
+func (ss *shardedSearcher) streamSearch(ctx context.Context, q query.Q, opts *zoekt.SearchOptions, events chan zoekt.StreamSearchEvent) {
+	defer close(events)
+
+	var stats zoekt.Stats
+	start := time.Now()
+
+	// TODO(keegan) observability
+	tr := trace.New("shardedSearcher.StreamSearch", "")
+	tr.LazyLog(q, true)
+	tr.LazyPrintf("opts: %+v", opts)
+	defer tr.Finish()
+
+	// This critical section is large, but we don't want to deal with
+	// searches on shards that have just been closed.
+	//
+	// TODO(keegan) issue around long lived streams? Some customers have
+	// searches take 10s+, so this is an issue even in non-stream version.
+	if err := ss.rlock(ctx); err != nil {
+		events <- zoekt.StreamSearchEvent{Error: err}
+		return
+	}
+	defer ss.runlock()
+	tr.LazyPrintf("acquired lock")
+	stats.Wait = time.Since(start)
+	start = time.Now()
+
+	shards := ss.getShards()
+	tr.LazyPrintf("before selectRepoSet shards:%d", len(shards))
+	shards, q = selectRepoSet(shards, q)
+	tr.LazyPrintf("after selectRepoSet shards:%d %s", len(shards), q)
+
+	events <- zoekt.StreamSearchEvent{
+		Log: fmt.Sprintf("searching %d shards for %s", len(shards), q.String()),
+	}
+
+	all := make(chan shardResult, len(shards))
+
+	var childCtx context.Context
+	var cancel context.CancelFunc
+	if opts.MaxWallTime == 0 {
+		childCtx, cancel = context.WithCancel(ctx)
+	} else {
+		childCtx, cancel = context.WithTimeout(ctx, opts.MaxWallTime)
+	}
+
+	defer cancel()
+
+	// For each query, throttle the number of parallel
+	// actions. Since searching is mostly CPU bound, we limit the
+	// number of parallel searches. This reduces the peak working
+	// set, which hopefully stops https://cs.bazel.build from crashing
+	// when looking for the string "com".
+	feeder := make(chan zoekt.Searcher, len(shards))
+	for _, s := range shards {
+		feeder <- s
+	}
+	close(feeder)
+	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+		go func() {
+			for s := range feeder {
+				searchOneShard(childCtx, s, q, opts, all)
+			}
+		}()
+	}
+
+	for range shards {
+		r := <-all
+		if r.err != nil {
+			events <- zoekt.StreamSearchEvent{Error: r.err}
+			return
+		}
+
+		res := r.sr
+
+		stats.Add(res.Stats)
+		if cancel != nil && opts.TotalMaxMatchCount > 0 && stats.MatchCount > opts.TotalMaxMatchCount {
+			cancel()
+			cancel = nil
+		}
+
+		// Need to copy []byte in results since they point into mmapped regions
+		for i := range res.Files {
+			copySlice(&res.Files[i].Content)
+			copySlice(&res.Files[i].Checksum)
+			for l := range res.Files[i].LineMatches {
+				copySlice(&res.Files[i].LineMatches[l].Line)
+			}
+		}
+
+		events <- zoekt.StreamSearchEvent{SearchResult: r.sr}
+	}
+
+	stats.Duration = time.Since(start)
 }
 
 func copySlice(src *[]byte) {
