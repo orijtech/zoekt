@@ -15,13 +15,9 @@
 package ctags
 
 import (
-	"bufio"
 	"os/exec"
 	"reflect"
-	"strings"
 	"testing"
-
-	"github.com/google/go-cmp/cmp"
 )
 
 func TestJSON(t *testing.T) {
@@ -58,14 +54,14 @@ class Back implements Future extends Frob {
 
 	want := []*Entry{
 		{
-			Sym:      "io.zoekt",
+			Name:     "io.zoekt",
 			Kind:     "package",
 			Language: "Java",
 			Path:     "io/zoekt/Back.java",
 			Line:     2,
 		},
 		{
-			Sym:      "Back",
+			Name:     "Back",
 			Path:     "io/zoekt/Back.java",
 			Line:     4,
 			Language: "Java",
@@ -73,7 +69,7 @@ class Back implements Future extends Frob {
 		},
 
 		{
-			Sym:        "BLA",
+			Name:       "BLA",
 			Path:       "io/zoekt/Back.java",
 			Line:       5,
 			Kind:       "field",
@@ -82,7 +78,7 @@ class Back implements Future extends Frob {
 			ParentKind: "class",
 		},
 		{
-			Sym:        "member",
+			Name:       "member",
 			Path:       "io/zoekt/Back.java",
 			Line:       6,
 			Language:   "Java",
@@ -91,7 +87,7 @@ class Back implements Future extends Frob {
 			ParentKind: "class",
 		},
 		{
-			Sym:        "Back",
+			Name:       "Back",
 			Path:       "io/zoekt/Back.java",
 			Language:   "Java",
 			Line:       7,
@@ -100,7 +96,7 @@ class Back implements Future extends Frob {
 			ParentKind: "class",
 		},
 		{
-			Sym:        "method",
+			Name:       "method",
 			Language:   "Java",
 			Path:       "io/zoekt/Back.java",
 			Line:       10,
@@ -114,38 +110,5 @@ class Back implements Future extends Frob {
 		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Fatalf("got %#v, want %#v", got[i], want[i])
 		}
-	}
-}
-
-func TestScanner(t *testing.T) {
-	size := 20
-
-	input := strings.Join([]string{
-		"aaaaaaaaa",
-		strings.Repeat("B", 3*size+3),
-		strings.Repeat("C", size) + strings.Repeat("D", size+1),
-		"",
-		strings.Repeat("e", size-1),
-		"f\r",
-		"gg",
-	}, "\n")
-	want := []string{
-		"aaaaaaaaa",
-		strings.Repeat("e", size-1),
-		"f",
-		"gg",
-	}
-
-	var got []string
-	r := &scanner{r: bufio.NewReaderSize(strings.NewReader(input), size)}
-	for r.Scan() {
-		got = append(got, string(r.Bytes()))
-	}
-	if err := r.Err(); err != nil {
-		t.Fatal(err)
-	}
-
-	if !cmp.Equal(got, want) {
-		t.Errorf("mismatch (-want +got):\n%s", cmp.Diff(want, got))
 	}
 }
