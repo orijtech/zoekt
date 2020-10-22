@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -88,6 +89,10 @@ type bruteForceMatchTree struct {
 	// mutable
 	firstDone bool
 	docID     uint32
+}
+
+type andLineMatchTree struct {
+	andMatchTree
 }
 
 type andMatchTree struct {
@@ -442,6 +447,10 @@ func visitMatchTree(t matchTree, f func(matchTree)) {
 		for _, ch := range s.children {
 			visitMatchTree(ch, f)
 		}
+	case *andLineMatchTree:
+		for _, ch := range s.children {
+			visitMatchTree(ch, f)
+		}
 	case *noVisitMatchTree:
 		visitMatchTree(s.matchTree, f)
 	case *notMatchTree:
@@ -462,6 +471,12 @@ func visitMatchTree(t matchTree, f func(matchTree)) {
 func visitMatches(t matchTree, known map[matchTree]bool, f func(matchTree)) {
 	switch s := t.(type) {
 	case *andMatchTree:
+		for _, ch := range s.children {
+			if known[ch] {
+				visitMatches(ch, known, f)
+			}
+		}
+	case *andLineMatchTree:
 		for _, ch := range s.children {
 			if known[ch] {
 				visitMatches(ch, known, f)
@@ -495,6 +510,63 @@ func (t *bruteForceMatchTree) matches(cp *contentProvider, cost int, known map[m
 	return true, true
 }
 
+// andLineMatchTree is a performance optimization of andMatchTree for content
+// searches. We don't want to run the regex engine, if we are certain that there
+// is no line that contains matches from all terms.
+func (t *andLineMatchTree) matches(cp *contentProvider, cost int, known map[matchTree]bool) (bool, bool) {
+	matches, sure := t.andMatchTree.matches(cp, cost, known)
+	if !(sure && matches) {
+		return matches, sure
+	}
+	// make sure we are running a content search
+	for _, child := range t.children {
+		if v, ok := child.(*substrMatchTree); !ok || v.fileName {
+			return matches, sure
+		}
+	}
+
+	// lineNumber returns the line number of a candidate. We leverage that line
+	// numbers strictly increase, and supply an offset to speed up the binary search.
+	newlines := cp.newlines()
+	lineNumber := func(candidate *candidateMatch, lineOffset int) int {
+		byteOffset := cp.findOffset(false, candidate.runeOffset)
+		return sort.Search(len(newlines[lineOffset:]), func(n int) bool {
+			return newlines[lineOffset:][n] >= byteOffset
+		}) + lineOffset
+	}
+	// build a map that counts matches per line.
+	candidates := t.children[0].(*substrMatchTree).current
+	iMap := make(map[int]int) // intersection map
+	ln := 0
+	for _, c := range candidates {
+		ln = lineNumber(c, ln)
+		iMap[ln] = 1
+	}
+
+	// check if there is a non-zero intersection of line numbers of all candidates
+	// from all children. For a non-empty intersection, at least one of the keys in
+	// iMap must have a value equal to the number of children processed so far.
+	for ix, child := range t.children[1:] {
+		intersection := false
+		candidates = child.(*substrMatchTree).current
+		ln := 0
+		for _, c := range candidates {
+			ln := lineNumber(c, ln)
+			if _, ok := iMap[ln]; ok {
+				iMap[ln]++
+				if iMap[ln] == ix+2 {
+					intersection = true
+				}
+			}
+		}
+		// stop early if child's candidates did not intersect.
+		if !intersection {
+			return false, sure
+		}
+	}
+	return matches, sure
+}
+
 func (t *andMatchTree) matches(cp *contentProvider, cost int, known map[matchTree]bool) (bool, bool) {
 	sure := true
 
@@ -507,6 +579,7 @@ func (t *andMatchTree) matches(cp *contentProvider, cost int, known map[matchTre
 			sure = false
 		}
 	}
+
 	return true, sure
 }
 
@@ -696,7 +769,7 @@ func (d *indexData) newMatchTree(q query.Q) (matchTree, error) {
 			}
 			r = append(r, ct)
 		}
-		return &andMatchTree{r}, nil
+		return &andLineMatchTree{andMatchTree{children: r}}, nil
 	case *query.Or:
 		var r []matchTree
 		for _, ch := range s.Children {
