@@ -510,15 +510,16 @@ func (t *bruteForceMatchTree) matches(cp *contentProvider, cost int, known map[m
 	return true, true
 }
 
-// andLineMatchTree is a performance optimization of andMatchTree for content
-// searches. We don't want to run the regex engine, if we are certain that there
-// is no line that contains matches from all terms.
+// andLineMatchTree is a performance optimization of andMatchTree. For content we
+// don't want to run the regex engine if there is no line that contains
+// matches from all terms.
 func (t *andLineMatchTree) matches(cp *contentProvider, cost int, known map[matchTree]bool) (bool, bool) {
 	matches, sure := t.andMatchTree.matches(cp, cost, known)
 	if !(sure && matches) {
 		return matches, sure
 	}
-	// make sure we are running a content search
+	// make sure we are running a content search and that all candidates are
+	// substrMatchTree
 	for _, child := range t.children {
 		if v, ok := child.(*substrMatchTree); !ok || v.fileName {
 			return matches, sure
@@ -536,30 +537,37 @@ func (t *andLineMatchTree) matches(cp *contentProvider, cost int, known map[matc
 	}
 	// build a map that counts matches per line.
 	candidates := t.children[0].(*substrMatchTree).current
-	iMap := make(map[int]int) // intersection map
+	isec := make(map[int]int) // intersection map
 	ln := 0
 	for _, c := range candidates {
 		ln = lineNumber(c, ln)
-		iMap[ln] = 1
+		isec[ln] = 1
 	}
-
 	// check if there is a non-zero intersection of line numbers of all candidates
 	// from all children. For a non-empty intersection, at least one of the keys in
-	// iMap must have a value equal to the number of children processed so far.
+	// isec must have a value equal to the number of children processed so far.
 	for ix, child := range t.children[1:] {
 		intersection := false
 		candidates = child.(*substrMatchTree).current
 		ln := 0
+		last := -1
 		for _, c := range candidates {
 			ln := lineNumber(c, ln)
-			if _, ok := iMap[ln]; ok {
-				iMap[ln]++
-				if iMap[ln] == ix+2 {
+			// count ln only once per child
+			if ln == last {
+				continue
+			}
+			if v, ok := isec[ln]; ok {
+				if v == ix+1 {
 					intersection = true
+					isec[ln]++
+					last = ln
+					continue
 				}
+				delete(isec, ln) // ln cannot be in the intersection
 			}
 		}
-		// stop early if child's candidates did not intersect.
+		// stop early if this child's candidates did not intersect.
 		if !intersection {
 			return false, sure
 		}
