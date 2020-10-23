@@ -769,7 +769,10 @@ func (d *indexData) newMatchTree(q query.Q) (matchTree, error) {
 			}
 			r = append(r, ct)
 		}
-		return &andLineMatchTree{andMatchTree{children: r}}, nil
+		if s.NoNewline {
+			return &andLineMatchTree{andMatchTree{r}}, nil
+		}
+		return &andMatchTree{r}, nil
 	case *query.Or:
 		var r []matchTree
 		for _, ch := range s.Children {

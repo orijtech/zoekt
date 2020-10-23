@@ -321,7 +321,8 @@ func (q *Not) String() string {
 
 // And is matched when all its children are.
 type And struct {
-	Children []Q
+	Children  []Q
+	NoNewline bool
 }
 
 func (q *And) String() string {
@@ -395,7 +396,7 @@ func flatten(q Q) (Q, bool) {
 			return s.Children[0], true
 		}
 		flatChildren, changed := flattenAndOr(s.Children, s)
-		return &And{flatChildren}, changed
+		return &And{flatChildren, s.NoNewline}, changed
 	case *Or:
 		if len(s.Children) == 1 {
 			return s.Children[0], true
@@ -430,7 +431,7 @@ func invertConst(q Q) Q {
 }
 
 func evalAndOrConstants(q Q, children []Q) Q {
-	_, isAnd := q.(*And)
+	oldAnd, isAnd := q.(*And)
 
 	children = mapQueryList(children, evalConstants)
 
@@ -450,7 +451,7 @@ func evalAndOrConstants(q Q, children []Q) Q {
 		return &Const{isAnd}
 	}
 	if isAnd {
-		return &And{newCH}
+		return &And{newCH, oldAnd.NoNewline}
 	}
 	return &Or{newCH}
 }
@@ -516,7 +517,7 @@ func Simplify(q Q) Q {
 func Map(q Q, f func(q Q) Q) Q {
 	switch s := q.(type) {
 	case *And:
-		q = &And{Children: mapQueryList(s.Children, f)}
+		q = &And{Children: mapQueryList(s.Children, f), NoNewline: s.NoNewline}
 	case *Or:
 		q = &Or{Children: mapQueryList(s.Children, f)}
 	case *Not:
