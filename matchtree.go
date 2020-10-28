@@ -368,7 +368,7 @@ func (t *andLineMatchTree) matches(cp *contentProvider, cost int, known map[matc
 
 	// find child with fewest candidates
 	min := maxUInt32
-	fewestChildren := -1
+	fewestChildren := 0
 	for ix, child := range t.children {
 		v, ok := child.(*substrMatchTree)
 		// make sure we are running a content search and that all candidates are a
