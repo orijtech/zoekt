@@ -398,10 +398,7 @@ func (t *andLineMatchTree) matches(cp *contentProvider, cost int, known map[matc
 	}
 
 	// keep track of the candidates we have already seen.
-	iteratorOffsets := make(map[int]int, len(t.children))
-	for i := 0; i < len(t.children); i++ {
-		iteratorOffsets[i] = 0
-	}
+	iteratorOffsets := make([]int, len(t.children))
 
 nextLine:
 	for _, line := range lines {
