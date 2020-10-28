@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -366,61 +365,73 @@ func (t *andLineMatchTree) matches(cp *contentProvider, cost int, known map[matc
 	if !(sure && matches) {
 		return matches, sure
 	}
-	// make sure we are running a content search and that all candidates are
-	// substrMatchTree
-	for _, child := range t.children {
-		if v, ok := child.(*substrMatchTree); !ok || v.fileName {
+
+	// find child with fewest candidates
+	min := maxUInt32
+	fewestChildren := -1
+	for ix, child := range t.children {
+		v, ok := child.(*substrMatchTree)
+		// make sure we are running a content search and that all candidates are a
+		// substrMatchTree
+		if !ok || v.fileName {
 			return matches, sure
+		}
+		if len(v.current) < min {
+			min = len(v.current)
+			fewestChildren = ix
 		}
 	}
 
-	// lineNumber returns the line number of a candidate. We leverage that line
-	// numbers strictly increase, and supply an offset to speed up the binary search.
-	newlines := cp.newlines()
-	lineNumber := func(candidate *candidateMatch, lineOffset int) int {
-		byteOffset := cp.findOffset(false, candidate.runeOffset)
-		return sort.Search(len(newlines[lineOffset:]), func(n int) bool {
-			return newlines[lineOffset:][n] >= byteOffset
-		}) + lineOffset
+	type lineRange struct {
+		start int
+		end   int
 	}
-	// build a map that counts matches per line.
-	candidates := t.children[0].(*substrMatchTree).current
-	isec := make(map[int]int) // intersection map
-	ln := 0
-	for _, c := range candidates {
-		ln = lineNumber(c, ln)
-		isec[ln] = 1
+	lines := make([]lineRange, len(t.children[fewestChildren].(*substrMatchTree).current))
+	prev := -1
+	for ix, candidate := range t.children[fewestChildren].(*substrMatchTree).current {
+		line, byteStart, byteEnd := candidate.line(cp.newlines(), cp.fileSize)
+		if line == prev {
+			continue
+		}
+		prev = line
+		lines[ix] = lineRange{byteStart, byteEnd}
 	}
-	// check if there is a non-zero intersection of line numbers of all candidates
-	// from all children. For a non-empty intersection, at least one of the keys in
-	// isec must have a value equal to the number of children processed so far.
-	for ix, child := range t.children[1:] {
-		intersection := false
-		candidates = child.(*substrMatchTree).current
-		ln := 0
-		last := -1
-		for _, c := range candidates {
-			ln := lineNumber(c, ln)
-			// count ln only once per child
-			if ln == last {
+
+	// keep track of the candidates we have already seen.
+	iteratorOffsets := make(map[int]int, len(t.children))
+	for i := 0; i < len(t.children); i++ {
+		iteratorOffsets[i] = 0
+	}
+
+nextLine:
+	for _, line := range lines {
+		// count the number of children with candidates on this line”
+		hits := 1
+	nextChild:
+		for j, child := range t.children {
+			if j == fewestChildren {
 				continue
 			}
-			if v, ok := isec[ln]; ok {
-				if v == ix+1 {
-					intersection = true
-					isec[ln]++
-					last = ln
-					continue
+		nextCandidate:
+			for k, candidate := range child.(*substrMatchTree).current[iteratorOffsets[j]:] {
+				bo := int(cp.findOffset(false, candidate.runeOffset))
+				if bo < line.start {
+					continue nextCandidate
 				}
-				delete(isec, ln) // ln cannot be in the intersection
+				iteratorOffsets[j] += k
+				if bo <= line.end {
+					hits++
+					continue nextChild
+				}
+				continue nextLine
 			}
 		}
-		// stop early if this child's candidates did not intersect.
-		if !intersection {
-			return false, sure
+		// return early once we found any line that contains matches from all children
+		if hits == len(t.children) {
+			return matches, true
 		}
 	}
-	return matches, sure
+	return false, true
 }
 
 func (t *andMatchTree) matches(cp *contentProvider, cost int, known map[matchTree]bool) (bool, bool) {
