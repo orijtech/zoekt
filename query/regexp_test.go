@@ -112,8 +112,8 @@ func TestRegexpParse(t *testing.T) {
 			if !ok {
 				t.Errorf("regexpToQuery(%q): got %s, want %s", c.in, reflect.TypeOf(query), reflect.TypeOf(c.query))
 			}
-			if want.NoNewline != got.NoNewline {
-				t.Errorf("regexpToQuery(%q): got %t, want %t", c.in, got.NoNewline, want.NoNewline)
+			if want.SingleLine != got.SingleLine {
+				t.Errorf("regexpToQuery(%q): got %t, want %t", c.in, got.SingleLine, want.SingleLine)
 			}
 		}
 	}

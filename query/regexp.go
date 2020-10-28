@@ -54,7 +54,7 @@ func RegexpToQuery(r *syntax.Regexp, minTextSize int) (query Q, isEquivalent boo
 	return q, isEq
 }
 
-func regexpToQueryRecursive(r *syntax.Regexp, minTextSize int) (query Q, isEquivalent bool, noNewline bool) {
+func regexpToQueryRecursive(r *syntax.Regexp, minTextSize int) (query Q, isEquivalent bool, singleLine bool) {
 	// TODO - we could perhaps transform Begin/EndText in '\n'?
 	// TODO - we could perhaps transform CharClass in (OrQuery )
 	// if there are just a few runes, and part of a OpConcat?
@@ -78,21 +78,21 @@ func regexpToQueryRecursive(r *syntax.Regexp, minTextSize int) (query Q, isEquiv
 	case syntax.OpConcat, syntax.OpAlternate:
 		var qs []Q
 		isEq := true
-		noNewline = true
+		singleLine = true
 		for _, sr := range r.Sub {
-			if sq, sm, subNoNewline := regexpToQueryRecursive(sr, minTextSize); sq != nil {
+			if sq, sm, subSingleLine := regexpToQueryRecursive(sr, minTextSize); sq != nil {
 				if !sm {
 					isEq = false
 				}
 				qs = append(qs, sq)
-				noNewline = noNewline && subNoNewline
+				singleLine = singleLine && subSingleLine
 			}
 		}
 		if r.Op == syntax.OpConcat {
 			if len(qs) > 1 {
 				isEq = false
 			}
-			return &And{qs, noNewline}, isEq, noNewline
+			return &And{qs, singleLine}, isEq, singleLine
 		}
 		return &Or{qs}, isEq, false
 	case syntax.OpStar:

@@ -632,7 +632,7 @@ func (d *indexData) newMatchTree(q query.Q) (matchTree, error) {
 			}
 			r = append(r, ct)
 		}
-		if s.NoNewline {
+		if s.SingleLine {
 			return &andLineMatchTree{andMatchTree{r}}, nil
 		}
 		return &andMatchTree{r}, nil
