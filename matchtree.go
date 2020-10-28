@@ -402,7 +402,7 @@ func (t *andLineMatchTree) matches(cp *contentProvider, cost int, known map[matc
 
 nextLine:
 	for _, line := range lines {
-		// count the number of children with candidates on this line”
+		// count the number of children with candidates on this line
 		hits := 1
 	nextChild:
 		for j, child := range t.children {
