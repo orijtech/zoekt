@@ -19,6 +19,9 @@ func NewClient(address string, httpClient *http.Client) *client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	if !strings.HasPrefix(address, "http://") {
+		address = "http://" + address
+	}
 	return &client{
 		address:    address,
 		httpClient: httpClient,
