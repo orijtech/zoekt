@@ -1103,6 +1103,7 @@ func TestListRepos(t *testing.T) {
 			Stats: RepoStats{
 				Documents:    4,
 				ContentBytes: 68,
+				Shards:       1,
 
 				NewLinesCount:              4,
 				DefaultBranchNewLinesCount: 2,
