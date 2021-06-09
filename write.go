@@ -147,9 +147,13 @@ func (b *IndexBuilder) Write(out io.Writer) error {
 	w.Write(marshalDocSections(b.runeDocSections))
 	toc.runeDocSections.end(w)
 
+	if b.indexTime.IsZero() {
+		b.indexTime = time.Now()
+	}
+
 	if err := b.writeJSON(&IndexMetadata{
 		IndexFormatVersion:  IndexFormatVersion,
-		IndexTime:           time.Now(),
+		IndexTime:           b.indexTime,
 		IndexFeatureVersion: FeatureVersion,
 		PlainASCII:          b.contentPostings.isPlainASCII && b.namePostings.isPlainASCII,
 		LanguageMap:         b.languageMap,

@@ -23,6 +23,7 @@ import (
 	"log"
 	"path/filepath"
 	"sort"
+	"time"
 	"unicode/utf8"
 )
 
@@ -179,6 +180,10 @@ type IndexBuilder struct {
 
 	// languages codes
 	languages []byte
+
+	// indexTime is the IndexMetadata.IndexTime. If zero, time.Now() is
+	// used. Used in tests for determinism.
+	indexTime time.Time
 }
 
 func (d *Repository) verify() error {
