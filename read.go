@@ -402,6 +402,14 @@ func NewSearcher(r IndexFile) (Searcher, error) {
 	if err != nil {
 		return nil, err
 	}
+	// This is a hack until we have updated the writer. View should be among the
+	// first things we read from disk.
+	indexData.view.off = 0
+	sz, err := r.Size()
+	if err != nil {
+		return nil, err
+	}
+	indexData.view.sz = sz
 
 	r, err = sourcegraphInMemoryContent(&toc, r)
 	if err != nil {

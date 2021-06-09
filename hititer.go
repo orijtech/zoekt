@@ -134,7 +134,7 @@ func (d *indexData) trigramHitIterator(ng ngram, caseSensitive, fileName bool) (
 			return nil, err
 		}
 		if len(blob) > 0 {
-			iters = append(iters, newCompressedPostingIterator(blob, v))
+			iters = append(iters, newPostingIteratorView(newCompressedPostingIterator(blob, v), d.view))
 		}
 	}
 
@@ -174,6 +174,49 @@ func (i *inMemoryIterator) next(limit uint32) {
 	for len(i.postings) > 0 && i.postings[0] <= limit {
 		i.postings = i.postings[1:]
 	}
+}
+
+// postingIteratorView will return the subset of values in it in the range
+// [view.off, view.off + view.sz). Additionally it will adjust all values by
+// -view.off.
+type postingIteratorView struct {
+	it   hitIterator
+	view simpleSection
+}
+
+func newPostingIteratorView(it hitIterator, view simpleSection) *postingIteratorView {
+	// ensure the iterator has jumped ahead to >= view.off. We need to do this in
+	// case first is called before next.
+	//
+	// Note: view.off is the the offset in bytes of a shard within a segment. It is
+	// equal to the total size of all shards before the current shards. The number of
+	// bytes is an upper bound on the maximum distance of two runes.
+	if view.off > 0 {
+		it.next(view.off - 1)
+	}
+	return &postingIteratorView{
+		it:   it,
+		view: view,
+	}
+}
+
+func (p *postingIteratorView) first() uint32 {
+	v := p.it.first() - p.view.off
+
+	// If the iterator crosses shard boundaries, p.it.first() is equal to the shard
+	// offset of the next shard and thus v = p.view.sz.
+	if v >= p.view.sz {
+		return maxUInt32
+	}
+	return v
+}
+
+func (p *postingIteratorView) next(limit uint32) {
+	p.it.next(limit + p.view.off)
+}
+
+func (p *postingIteratorView) updateStats(s *Stats) {
+	p.it.updateStats(s)
 }
 
 // compressedPostingIterator goes over a delta varint encoded posting

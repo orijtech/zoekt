@@ -29,6 +29,16 @@ import (
 // in memory to search. Most of the memory is taken up by the ngram =>
 // offset index.
 type indexData struct {
+	// view records the section of the underlying file this repository is stored.
+	//
+	// We can have multiple IndexFiles in a single on-disk shard. We are in the
+	// process of migrating all fields to be aware of this. Until then, view
+	// records the section of the file this indexData represents.
+	//
+	// Currently these fields are aware of view:
+	// - ngrams
+	view simpleSection
+
 	symbols symbolData
 
 	file IndexFile
