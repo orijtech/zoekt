@@ -2,30 +2,57 @@ package zoekt
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
-	"time"
 	"unsafe"
 
 	"github.com/google/go-cmp/cmp"
 )
 
 func TestConvert(t *testing.T) {
-	// Use the same indextime for both for comparison.
-	epoch := time.Unix(0, 0).UTC()
+	t.Run("simple", func(t *testing.T) {
+		b := testIndexBuilder(t, nil,
+			Document{
+				Name:    "f2",
+				Content: []byte("to carry water in the no later bla"),
+			},
+			Document{
+				Name:    "f3/f3",
+				Content: []byte("hey this one actually\nhas\nnew lines"),
+			})
 
-	b := testIndexBuilder(t, nil,
-		Document{
-			Name:    "f2",
-			Content: []byte("to carry water in the no later bla"),
-			// ------------- 0123456789012345678901234567890123456789
+		var buf bytes.Buffer
+		b.Write(&buf)
+		testConvert(t, &memSeeker{buf.Bytes()})
+	})
+
+	shards, err := filepath.Glob("testdata/shards/*_v16.*.zoekt")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, p := range shards {
+		name := strings.Split(filepath.Base(p), "_")[0]
+		t.Run(name, func(t *testing.T) {
+			f, err := os.Open(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			origin, err := NewIndexFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			testConvert(t, origin)
 		})
-	b.indexTime = epoch
+	}
+}
 
-	var buf bytes.Buffer
-	b.Write(&buf)
-	origin := &memSeeker{buf.Bytes()}
-
+func testConvert(t *testing.T, origin IndexFile) {
 	searcher, err := NewSearcher(origin)
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +62,7 @@ func TestConvert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2.indexTime = epoch
+	b2.indexTime = searcher.(*indexData).metaData.IndexTime
 
 	var buf2 bytes.Buffer
 	b2.Write(&buf2)

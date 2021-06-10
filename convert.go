@@ -1,6 +1,8 @@
 package zoekt
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+)
 
 // convert will create the equivalent IndexBuilder for d. Writing this file
 // out should result in the same on shard.
@@ -57,6 +59,14 @@ func convert(d *indexData) (*IndexBuilder, error) {
 	ib.subRepos = d.subRepos
 	ib.branchMasks = d.fileBranchMasks
 	ib.fileEndSymbol = d.fileEndSymbol
+
+	// symbols data is tricky.
+	symbolsSingleton := []*Symbol{nil}
+	symbolsCount := len(d.symbols.symMetaData) / (4 * 4)
+	for i := 0; i < symbolsCount; i++ {
+		symbolsSingleton[0] = d.symbols.data(uint32(i))
+		ib.addSymbols(symbolsSingleton)
+	}
 
 	return ib, nil
 }
