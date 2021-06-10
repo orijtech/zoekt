@@ -36,8 +36,10 @@ func convert(d *indexData) (*IndexBuilder, error) {
 
 	ib.contentPostings.runeOffsets = d.runeOffsets
 	ib.contentPostings.endRunes = d.fileEndRunes
+	ib.contentPostings.isPlainASCII = d.metaData.PlainASCII
 	ib.namePostings.runeOffsets = d.fileNameRuneOffsets
 	ib.namePostings.endRunes = d.fileNameEndRunes
+	ib.namePostings.isPlainASCII = d.metaData.PlainASCII
 
 	for ngram, sec := range d.ngrams {
 		ib.contentPostings.postings[ngram], err = d.readSectionBlob(sec)

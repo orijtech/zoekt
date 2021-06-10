@@ -21,7 +21,7 @@ func TestConvert(t *testing.T) {
 			},
 			Document{
 				Name:    "f3/f3",
-				Content: []byte("hey this one actually\nhas\nnew lines"),
+				Content: []byte("hey this one actually\nblá\nhas\nnew lines"),
 			})
 
 		var buf bytes.Buffer
