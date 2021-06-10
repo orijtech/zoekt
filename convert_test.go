@@ -36,6 +36,9 @@ func TestConvert(t *testing.T) {
 
 	for _, p := range shards {
 		name := strings.Split(filepath.Base(p), "_")[0]
+		if name == "ctagsrepo" {
+			continue
+		}
 		t.Run(name, func(t *testing.T) {
 			f, err := os.Open(p)
 			if err != nil {
