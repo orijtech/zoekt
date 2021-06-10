@@ -1,8 +1,82 @@
 package zoekt
 
 import (
+	"bytes"
 	"encoding/binary"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 )
+
+func ConvertTest(src string) error {
+	dstF, err := ioutil.TempFile(filepath.Dir(src), filepath.Base(src)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(dstF.Name())
+	defer dstF.Close()
+
+	srcF, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcF.Close()
+
+	srcIF, err := NewIndexFile(srcF)
+	if err != nil {
+		return err
+	}
+	defer srcIF.Close()
+
+	srcSearcher, err := NewSearcher(srcIF)
+	if err != nil {
+		return err
+	}
+	srcD := srcSearcher.(*indexData)
+
+	builder, err := convert(srcD)
+	if err != nil {
+		return err
+	}
+	builder.indexTime = srcD.metaData.IndexTime
+	Version = srcD.metaData.ZoektVersion
+
+	err = builder.Write(dstF)
+	if err != nil {
+		return err
+	}
+
+	srcF.Close()
+	srcF, err = os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcF.Close()
+
+	dstF.Seek(0, 0)
+
+	a := make([]byte, 64000)
+	b := make([]byte, 64000)
+	for {
+		n1, err1 := srcF.Read(a)
+		a = a[:n1]
+		n2, err2 := dstF.Read(b)
+		b = b[:n2]
+		if err1 != err2 {
+			return fmt.Errorf("different errors: %v and %v", err1, err2)
+		}
+		if !bytes.Equal(a, b) {
+			return fmt.Errorf("files are different")
+		}
+		if err1 == io.EOF {
+			break
+		}
+	}
+
+	return nil
+}
 
 // convert will create the equivalent IndexBuilder for d. Writing this file
 // out should result in the same on shard.
