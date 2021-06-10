@@ -15,7 +15,6 @@
 package zoekt
 
 import (
-	"encoding/binary"
 	"log"
 	"math/rand"
 	"reflect"
@@ -146,22 +145,6 @@ func TestCompressedPostingIterator(t *testing.T) {
 		return nums
 	}
 	testIncreasingIntCoder(t, toDeltas, decode)
-}
-
-func toDeltas(offsets []uint32) []byte {
-	var enc [8]byte
-
-	deltas := make([]byte, 0, len(offsets)*2)
-
-	var last uint32
-	for _, p := range offsets {
-		delta := p - last
-		last = p
-
-		m := binary.PutUvarint(enc[:], uint64(delta))
-		deltas = append(deltas, enc[:m]...)
-	}
-	return deltas
 }
 
 func testIncreasingIntCoder(t *testing.T, encode func([]uint32) []byte, decode func([]byte) []uint32) {

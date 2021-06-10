@@ -71,6 +71,10 @@ func assertShardEqual(t *testing.T, a, b IndexFile) {
 				if diff := cmp.Diff(readCompoundSection(t, a, valA.(compoundSection)), readCompoundSection(t, b, valB.(compoundSection))); diff != "" {
 					t.Fatalf("mismatch (-want +got):\n%s", diff)
 				}
+			case lazyCompoundSection:
+				if diff := cmp.Diff(readCompoundSection(t, a, valA.(lazyCompoundSection).compoundSection), readCompoundSection(t, b, valB.(lazyCompoundSection).compoundSection)); diff != "" {
+					t.Fatalf("mismatch (-want +got):\n%s", diff)
+				}
 			default:
 				t.Fatal("unexpected field type", field.Type)
 			}
