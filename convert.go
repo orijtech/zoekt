@@ -59,6 +59,7 @@ func convert(d *indexData) (*IndexBuilder, error) {
 	ib.subRepos = d.subRepos
 	ib.branchMasks = d.fileBranchMasks
 	ib.fileEndSymbol = d.fileEndSymbol
+	ib.runeDocSections = d.runeDocSections
 
 	// symbols data is tricky.
 	symbolsSingleton := []*Symbol{nil}
