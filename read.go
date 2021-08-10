@@ -316,6 +316,51 @@ func (r *reader) readMetadata(toc *indexTOC) (*Repository, *IndexMetadata, error
 	return &repo, &md, nil
 }
 
+func (s *indexData) MissingBloomFilter() bool {
+	return len(s.fileNameIndex) > 0 && s.bloomNames.Len() == 0
+}
+
+func (s *indexData) RebuildBloomFilter(fname string) {
+	nameBloom := makeBloomFilterEmpty()
+	contentBloom := makeBloomFilterEmpty()
+
+	nameBloomPath := fname + ".name.bloom"
+	contentBloomPath := fname + ".content.bloom"
+
+	if _, err := os.Stat(nameBloomPath); err == nil {
+		buf, err := os.ReadFile(nameBloomPath)
+		if err == nil {
+			s.bloomNames.GobDecode(buf)
+		}
+	}
+	if s.bloomNames.Len() == 0 {
+		for i := 0; i < len(s.fileNameIndex)-1; i++ {
+			nameBloom.addBytes(s.fileName(uint32(i)))
+		}
+		s.bloomNames = nameBloom.shrinkToSize(bloomDefaultLoad)
+		enc, _ := s.bloomNames.GobEncode()
+		os.WriteFile(nameBloomPath+".tmp", enc, 0644)
+		os.Rename(nameBloomPath+".tmp", nameBloomPath)
+	}
+
+	if _, err := os.Stat(contentBloomPath); err == nil {
+		buf, err := os.ReadFile(contentBloomPath)
+		if err == nil {
+			s.bloomContents.GobDecode(buf)
+		}
+	}
+	if s.bloomContents.Len() == 0 {
+		for i := 0; i < len(s.fileNameEndRunes); i++ {
+			b, _ := s.readContents(uint32(i))
+			contentBloom.addBytes(b)
+		}
+		s.bloomContents = contentBloom.shrinkToSize(bloomDefaultLoad)
+		enc, _ := s.bloomContents.GobEncode()
+		os.WriteFile(contentBloomPath+".tmp", enc, 0644)
+		os.Rename(contentBloomPath+".tmp", contentBloomPath)
+	}
+}
+
 const ngramEncoding = 8
 
 func (d *indexData) readNgrams(toc *indexTOC) (combinedNgramOffset, error) {

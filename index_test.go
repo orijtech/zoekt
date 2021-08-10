@@ -311,6 +311,7 @@ func TestAndSearch(t *testing.T) {
 		MatchCount:         1,
 		FileCount:          1,
 		FilesConsidered:    2,
+		ShardsScanned:      1,
 	}
 	if diff := pretty.Compare(wantStats, sres.Stats); diff != "" {
 		t.Errorf("got stats diff %s", diff)

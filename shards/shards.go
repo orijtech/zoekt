@@ -153,6 +153,9 @@ func newShardedSearcher(n int64) *shardedSearcher {
 		shards: make(map[string]rankedShard),
 		sched:  newScheduler(n),
 	}
+	if os.Getenv("BACKFILL_BLOOM") != "" {
+		go ss.backfillBloom()
+	}
 	return ss
 }
 
@@ -747,6 +750,61 @@ func (s *shardedSearcher) replace(key string, shard zoekt.Searcher) {
 	s.ranked = nil
 
 	metricShardsLoaded.Set(float64(len(s.shards)))
+}
+
+// temporary hack to allow testing bloom filters, please ignore
+func (s *shardedSearcher) backfillBloom() {
+	firstTime := true
+
+	type work struct {
+		key string
+		s   zoekt.SearcherBloomChecker
+	}
+
+	todo := make(chan work, 100)
+	var wg sync.WaitGroup
+
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go func() {
+			for w := range todo {
+				w.s.RebuildBloomFilter(w.key)
+				log.Printf("built new bloom filters: %s", w.key)
+				wg.Done()
+			}
+		}()
+	}
+
+	time.Sleep(1 * time.Second)
+
+	for {
+		n := 0
+
+		proc, err := s.sched.Acquire(context.Background())
+		if err != nil {
+			return
+		}
+		for key, shard := range s.shards {
+			if rd, ok := shard.Searcher.(zoekt.SearcherBloomChecker); ok {
+				if rd.MissingBloomFilter() {
+					wg.Add(1)
+					todo <- work{key, rd}
+					n++
+					if n > 80 {
+						break
+					}
+				}
+			}
+		}
+		proc.Release()
+		wg.Wait()
+		if n == 0 {
+			if firstTime {
+				log.Printf("finished backfilling bloom filters")
+				firstTime = false
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 }
 
 func loadShard(fn string) (zoekt.Searcher, error) {
