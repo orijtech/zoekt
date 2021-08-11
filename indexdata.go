@@ -369,9 +369,9 @@ func (r *ngramIterationResults) candidates() []*candidateMatch {
 func (d *indexData) iterateNgrams(query *query.Substring) (*ngramIterationResults, error) {
 	str := query.Pattern
 
-	if d.bloomNames.Len() > 0 && len(query.Pattern) >= 4 {
-		prefix := []byte(query.Pattern)
-		fnmatch := d.bloomNames.maybeHasBytes(prefix)
+	if d.bloomNames.Len() > 0 && len(query.Pattern) >= bloomHashMinWordLength {
+		pat := []byte(query.Pattern)
+		fnmatch := d.bloomNames.maybeHasBytes(pat)
 		if query.FileName {
 			if !fnmatch {
 				return &ngramIterationResults{
@@ -381,7 +381,7 @@ func (d *indexData) iterateNgrams(query *query.Substring) (*ngramIterationResult
 				}, nil
 			}
 		} else {
-			if !fnmatch && !d.bloomContents.maybeHasBytes(prefix) {
+			if !fnmatch && !d.bloomContents.maybeHasBytes(pat) {
 				return &ngramIterationResults{
 					matchIterator: &noMatchTree{
 						Why: "bloomfilter",

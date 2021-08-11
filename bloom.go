@@ -39,7 +39,6 @@ import (
 	"math"
 	"math/bits"
 	"reflect"
-	"sync"
 
 	"github.com/dchest/siphash"
 )
@@ -51,41 +50,16 @@ type bloom struct {
 
 type bloomHash func([]byte) []uint32
 
-var bloomWordTab [256 / 64]uint64
-var bloomWordOnce sync.Once
-
-func initBloomWordTab() {
-	for x := byte(0); x < 128; x++ {
-		if x == '_' || 'a' <= x && x <= 'z' || 'A' <= x && x < 'Z' || '0' <= x && x <= '9' {
-			bloomWordTab[x/64] |= 1 << (x % 64)
-		}
-	}
-}
-
-func findNextWord(i int, in []byte) (int, []byte) {
-	for i < len(in) {
-		for i < len(in) && bloomWordTab[in[i]/64]&(1<<(in[i]%64)) == 0 {
-			i++
-		}
-		// count length of \w+ section
-		wordStart := i
-		for i < len(in) && bloomWordTab[in[i]/64]&(1<<(in[i]%64)) != 0 {
-			i++
-		}
-		// skip short words
-		if i-wordStart < 4 {
-			continue
-		}
-		return i, bytes.ToLower(in[wordStart:i])
-	}
-	return i, nil
-}
-
-// least common multiple of of {1..25} - {19,23}
-// this permits precise resizing for many different factors
+// Least common multiple of of {1..18}.
+// This permits precise resizing for many different factors without
+// using excessive RAM during processing. Some shards will saturate
+// the bloom filter (have a load factor greater than the target),
+// but they tend to be edge cases with a huge number of distinct
+// ngrams, so we have to rely on the trigram index iteration to search.
 const bloomSizeBase = 12252240
 
-// empirically determined to achieve 1% FPR
+// bloomDefaultHash and bloomDefaultLoad were empirically
+// determined to achieve 1% FPR with minimal space usage.
 var bloomDefaultHash = bloomHasherCRCBlocked64B8K3
 
 const bloomDefaultLoad = 0.42
@@ -94,12 +68,10 @@ const bloomDefaultLoad = 0.42
 var crcTab = crc32.MakeTable(crc32.Castagnoli)
 
 func makeBloomFilterEmpty() bloom {
-	bloomWordOnce.Do(initBloomWordTab)
 	return bloom{bloomDefaultHash, make([]uint8, bloomSizeBase)}
 }
 
 func makeBloomFilterWithHasher(hash bloomHash) bloom {
-	bloomWordOnce.Do(initBloomWordTab)
 	return bloom{hash, make([]uint8, bloomSizeBase)}
 }
 
@@ -113,10 +85,14 @@ func (b *bloom) add(xs []uint32) {
 	}
 }
 
+// addBytes splits the input into case-insentive word fragments, hashes them,
+// and adds them all to the bloom filter.
 func (b *bloom) addBytes(data []byte) {
 	b.add(b.hasher(data))
 }
 
+// addBytes splits the input into case-insentive word fragments, hashes them,
+// and tests if they're all in the bloom filter.
 func (b *bloom) maybeHas(xs []uint32) bool {
 	for _, x := range xs {
 		if b.bits[int(x/8)%len(b.bits)]&(1<<(x%8)) == 0 {
@@ -159,11 +135,14 @@ func (b *bloom) shrinkToSize(target float64) bloom {
 	// that its inputs are all unset-- 1-(1-x)^k. To get k given y,
 	// https://www.wolframalpha.com/input/?i=solve+for+k+in+y%3D1-%281-x%29%5Ek
 	// => k=log(1-y)/log(1-x)
-	factor := int(math.Log(1-target) / math.Log(1-b.load()))
+	factor := len(b.bits)
+	divisor := math.Log(1 - b.load())
+	if divisor != 0 { // avoid divide by zero for empty filter (b.load() is 0)
+		factor = int(math.Log(1-target) / divisor)
+	}
 
-	// We can only shrink the bloom filter to a size
-	// that is a factor of the input size. This is made easier by bloomSizeBase
-	// being highly composite.
+	// We can only shrink the bloom filter to a size that is a factor of the
+	// input size. This is made easier by bloomSizeBase being highly composite.
 	for factor > 0 && len(b.bits)%factor != 0 {
 		factor--
 	}
@@ -186,8 +165,8 @@ func (b *bloom) shrinkToSize(target float64) bloom {
 
 func (b *bloom) GobEncode() ([]byte, error) {
 	out := make([]byte, len(b.bits)+2)
-	out[0] = 1
-	out[1] = bloomHasherIds[reflect.ValueOf(b.hasher).Pointer()]
+	out[0] = 1                                                   // serialization version
+	out[1] = bloomHasherIds[reflect.ValueOf(b.hasher).Pointer()] // hasher id
 	copy(out[2:], b.bits)
 	return out, nil
 }
@@ -205,12 +184,59 @@ func (b *bloom) GobDecode(buf []byte) error {
 	return nil
 }
 
+// bloomHasherIds maps from function pointers to hash numbers, to allow
+// backwards compatible hash function changes.
 var bloomHasherIds = map[uintptr]byte{
 	reflect.ValueOf(bloomHasherCRCBlocked64B8K3).Pointer(): 1,
 }
 
+// bloomHashers maps from hash identifierss stored in encoded bloom filters to
+// hash functions, to allo backwards compatible hash function evolution.
 var bloomHashers = []bloomHash{
 	bloomHasherCRCBlocked64B8K3,
+}
+
+// The following functions and constants *must not* be changed unless you can prove
+// they have exactly identical behavior. Instead of changing these functions,
+// add a new hash function and a new entry in bloomHasherIds and bloomHashers,
+// then change the default hash function.
+//
+// This allows changing to a new hash function without invalidating all existing
+// files, and more importantly, without starting to return false negatives (!!!)
+// because the hash function changed unexpectedly.
+const bloomHashMinWordLength = 4
+
+// bloomWordTab uses a table to implement a matcher for the regex \w{4,}
+var bloomWordTab [256 / 64]uint64 = initBloomWordTab()
+
+func initBloomWordTab() [256 / 64]uint64 {
+	var tab [256 / 64]uint64
+	for x := byte(0); x < 128; x++ {
+		if x == '_' || 'a' <= x && x <= 'z' || 'A' <= x && x < 'Z' || '0' <= x && x <= '9' {
+			tab[x/64] |= 1 << (x % 64)
+		}
+	}
+	return tab
+}
+
+func findNextWord(i int, in []byte) (int, []byte) {
+	for i < len(in) {
+		// skip non-word bytes
+		for i < len(in) && bloomWordTab[in[i]/64]&(1<<(in[i]%64)) == 0 {
+			i++
+		}
+		// count length of \w+ section
+		wordStart := i
+		for i < len(in) && bloomWordTab[in[i]/64]&(1<<(in[i]%64)) != 0 {
+			i++
+		}
+		// skip short words
+		if i-wordStart < bloomHashMinWordLength {
+			continue
+		}
+		return i, bytes.ToLower(in[wordStart:i])
+	}
+	return i, nil
 }
 
 func bloomHasherCRC(in []byte) []uint32 {

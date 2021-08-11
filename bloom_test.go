@@ -57,6 +57,19 @@ func TestBloomHasher(t *testing.T) {
 func TestBloomBasic(t *testing.T) {
 	b := makeBloomFilterEmpty()
 
+	// Edge case: empty bloom filter resizing
+	b1 := b.shrinkToSize(0.9999)
+	if b1.Len() != 8 {
+		t.Error("Empty bloom filter didn't resize to 1B")
+	}
+
+	// Edge case: nearly empty bloom filter resizing
+	b.addBytes([]byte("some"))
+	b2 := b.shrinkToSize(0.999)
+	if b2.Len() != 8 {
+		t.Error("Nearly empty bloom filter didn't resize to 1B")
+	}
+
 	// these test strings are carefully selected to not collide
 	// with the default hash functions.
 	inp := []byte(`some different test words that will definitely be present
