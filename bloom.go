@@ -289,6 +289,94 @@ func bloomHasherCRCBlocked64B8K3(in []byte) []uint32 {
 	return out
 }
 
+func bloomHasherSiphash64(in []byte) []uint64 {
+	out := []uint64{}
+	for i := 0; i < len(in); {
+		var s []byte
+		i, s = findNextWord(i, in)
+		for l := 8; l >= 4; l-- {
+			if l > len(s) {
+				continue
+			}
+			for i := 0; i+l <= len(s); i++ {
+				if '0' <= s[i] && s[i] <= '9' {
+					continue
+				}
+				out = append(out, siphash.Hash(0, 0, s[i:i+l]))
+			}
+		}
+	}
+	return out
+}
+
+// a simple set to store uint64 hashes using open addressing and linear probing
+type u64HashSet struct {
+	items   []uint64
+	count   int
+	hasZero bool // zero is the empty value, use a bit to note if we have a real 0
+}
+
+func makeU64HashSet() u64HashSet {
+	return u64HashSet{items: make([]uint64, 1<<18)}
+}
+
+func (h *u64HashSet) addBytes(buf []byte) {
+	for _, x := range bloomHasherSiphash64(buf) {
+		h.add(x)
+	}
+}
+
+func (h *u64HashSet) add(x uint64) {
+	if x == 0 {
+		h.hasZero = true
+		return
+	}
+	i := int(x) & (len(h.items) - 1)
+	for h.items[i] != 0 && h.items[i] != x {
+		i = (i + 1) & (len(h.items) - 1)
+	}
+	if h.items[i] == 0 {
+		h.items[i] = x
+		h.count++
+		if h.count > len(h.items)/2 {
+			h.rehash()
+		}
+	}
+}
+
+func (h *u64HashSet) rehash() {
+	nitems := make([]uint64, len(h.items)*2)
+	nmod := len(nitems) - 1
+	for _, n := range h.items {
+		if n == 0 {
+			continue
+		}
+		j := int(n) & nmod
+		for nitems[j] != 0 {
+			j = (j + 1) & nmod
+		}
+		nitems[j] = n
+	}
+	h.items = nitems
+}
+
+func (h *u64HashSet) condense() []uint64 {
+	n := 0
+	for _, x := range h.items {
+		if x != 0 {
+			h.items[n] = x
+			n++
+		}
+	}
+	if h.hasZero {
+		h.items[n] = 0
+		n++
+	}
+	items := h.items[:n]
+	h.items = nil // set is unusable after this
+	return items
+}
+
 // TODO: NOTHING INTERESTING BELOW THIS POINT; WILL BE PUT INTO
 // A SEPARATE SCRATCH REPO / GIST LATER
 

@@ -2,6 +2,7 @@ module github.com/google/zoekt
 
 require (
 	cloud.google.com/go v0.82.0
+	github.com/FastFilter/xorfilter v0.0.0-20210618184958-3504b2eb9fb2 // indirect
 	github.com/Microsoft/go-winio v0.5.0 // indirect
 	github.com/ProtonMail/go-crypto v0.0.0-20210707164159-52430bf6b52c // indirect
 	github.com/andygrunwald/go-gerrit v0.0.0-20191101112536-3f5e365ccf57

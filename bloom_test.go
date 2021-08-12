@@ -16,8 +16,10 @@ package zoekt // import "github.com/google/zoekt"
 
 import (
 	"bytes"
+	"encoding/binary"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"io/fs"
 	"math/rand"
 	"os"
@@ -29,6 +31,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unsafe"
+
+	"github.com/FastFilter/xorfilter"
 )
 
 var (
@@ -36,7 +41,9 @@ var (
 	docCount     = flag.Int("docs", 0, "number of docs to load, (default 0 for all)")
 	hasherNum    = flag.Int("hasher", 0, "index of the hasher to test")
 	loadPerc     = flag.String("load", "50", "space-separated lists of target load percentages")
+	docFpr       = flag.Bool("docfpr", false, "show per-document FPRs")
 	trigramFpr   = flag.Bool("tri", false, "compute FPR for trigram-based filtering")
+	xorfilterFpr = flag.Bool("xor", false, "compute FPR for trigram-based filtering")
 )
 
 func TestBloomHasher(t *testing.T) {
@@ -94,6 +101,28 @@ func TestBloomBasic(t *testing.T) {
 				t.Errorf("%d filter shouldn't contain %q but does", i, string(w))
 			}
 		}
+	}
+}
+
+func TestU64Map(t *testing.T) {
+	buf := []byte{0, 0, 0, 0}
+	hs := makeU64HashSet()
+	hs.add(0)
+	rmap := map[uint64]struct{}{0: struct{}{}}
+	for i := 55000; i < 140000; i++ {
+		binary.LittleEndian.PutUint32(buf, uint32(i))
+		h := uint64(crc32.Checksum(buf, crcTab))<<32 |
+			uint64(crc32.Update(7, crcTab, buf))
+		hs.add(h)
+		rmap[h] = struct{}{}
+	}
+	cond := hs.condense()
+	if len(rmap) != len(cond) {
+		t.Errorf("wrong length: hashset: %d correct: %d\n", len(cond), len(rmap))
+		for _, x := range cond {
+			delete(rmap, x)
+		}
+		t.Log("items in map and not hashset:", rmap)
 	}
 }
 
@@ -241,10 +270,23 @@ func TestBloomFalsePositiveRate(t *testing.T) {
 	docs := [][]byte{}
 	docNames := []string{}
 	blooms := [][]bloom{}
+	filters := []*xorfilter.BinaryFuse8{}
 
 	addDoc := func(name string, doc []byte, parallel bool) ([]bloom, int) {
 		b := makeBloomFilterWithHasher(hasher)
 		b.addBytes(doc)
+		var filter *xorfilter.BinaryFuse8
+		if *xorfilterFpr {
+			hs := makeU64HashSet()
+			hs.addBytes(doc)
+			keys := hs.condense()
+			var err error
+			filter, err = xorfilter.PopulateBinaryFuse8(keys) // keys is of type []uint64
+			if err != nil {
+				fmt.Printf("unable to build xor filter for %d keys from %s\n",
+					len(keys), name)
+			}
+		}
 		bs := []bloom{}
 		for _, r := range targetRate {
 			bs = append(bs, b.shrinkToSize(float64(r)*0.01))
@@ -255,6 +297,7 @@ func TestBloomFalsePositiveRate(t *testing.T) {
 		}
 		docNames = append(docNames, name)
 		blooms = append(blooms, bs)
+		filters = append(filters, filter)
 		i := len(blooms)
 		docs = append(docs, doc)
 		docsize += len(doc)
@@ -276,7 +319,7 @@ func TestBloomFalsePositiveRate(t *testing.T) {
 			return dirents[i].Name() < dirents[j].Name()
 		})
 
-		if *docCount > 0 {
+		if *docCount > 0 && *docCount < len(dirents) {
 			dirents = dirents[:*docCount]
 		}
 
@@ -332,6 +375,7 @@ func TestBloomFalsePositiveRate(t *testing.T) {
 			docNames[i], docNames[j] = docNames[j], docNames[i]
 			docs[i], docs[j] = docs[j], docs[i]
 			blooms[i], blooms[j] = blooms[j], blooms[i]
+			filters[i], filters[j] = filters[j], filters[i]
 		},
 	})
 
@@ -432,6 +476,27 @@ func TestBloomFalsePositiveRate(t *testing.T) {
 						}
 					}
 
+					if *xorfilterFpr {
+						maybeXorHas := true
+						for _, x := range bloomHasherSiphash64([]byte(w)) {
+							if !filters[i].Contains(x) {
+								maybeXorHas = false
+								break
+							}
+						}
+						if maybeXorHas {
+							gidx = sort.SearchStrings(gram, string(w))
+							trueValue = gidx >= 0 && gidx < len(gram) && gram[gidx] == string(w)
+							if trueValue {
+								tpCount[i][len(targetRate)]++
+							} else {
+								fpCount[i][len(targetRate)]++
+							}
+						} else {
+							tnCount[i][len(targetRate)]++
+						}
+					}
+
 					for bn, b := range blooms[i] {
 						maybeHas := b.maybeHas(probeHashes[j])
 						if maybeHas {
@@ -492,14 +557,22 @@ func TestBloomFalsePositiveRate(t *testing.T) {
 
 	summer := make([]kahanSummer, len(targetRate)+1)
 	for i := 0; i < len(docs); i++ {
+		fprs := []string{}
 		for bn := 0; bn < len(fpCount[i]); bn++ {
 			fpr := float64(fpCount[i][bn]) / float64(fpCount[i][bn]+tnCount[i][bn])
 			if fpr > 0.1 && false {
 				t.Errorf("false positive rate %.04f > 0.01", fpr)
 			}
 			summer[bn].add(fpr)
+			if *docFpr {
+				fprs = append(fprs, fmt.Sprintf("%5.2f", 100*fpr))
+			}
 		}
-		// t.Logf("doc: %d bits: %8d tp: %6d tn: %6d fp: %v", i, blooms[i][0].Len(), tpCount[i][0], tnCount[i][0], fpCount[i])
+		if *docFpr {
+			if *xorfilterFpr {
+				fmt.Printf("doc: %4d bits: %8d xorbits: %8d fprs: %v name: %s\n", i, blooms[i][0].Len(), 8*len(filters[i].Fingerprints), fprs, docNames[i])
+			}
+		}
 	}
 	fmt.Printf("hash=%s\n", hname)
 	fmt.Println("load,fpr,avg size")
@@ -508,6 +581,13 @@ func TestBloomFalsePositiveRate(t *testing.T) {
 	}
 	if *trigramFpr {
 		fmt.Printf("trigram fpr: %.03f\n", 100*summer[len(targetRate)].avg())
+	}
+	if *xorfilterFpr {
+		s := 0
+		for _, f := range filters {
+			s += len(f.Fingerprints) + int(unsafe.Sizeof(*f))
+		}
+		fmt.Printf("xorfilter fpr: %.03f, size: %d\n", 100*summer[len(targetRate)].avg(), s/len(docs))
 	}
 }
 
