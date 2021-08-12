@@ -103,7 +103,7 @@ func TestIndex(t *testing.T) {
 			},
 		},
 		wantArchive: []string{
-			"zoekt-archive-index -name test/repo -commit deadbeef -branch HEAD -disable_ctags http://api.test/.internal/git/test/repo/tar/deadbeef",
+			"zoekt-archive-index -name test/repo -commit deadbeef -branch HEAD -repo_id 0 -raw_config {\"archived\":\"0\",\"fork\":\"0\",\"priority\":\"0\",\"public\":\"0\",\"repoid\":\"0\"} -disable_ctags http://api.test/.internal/git/test/repo/tar/deadbeef",
 		},
 		wantGit: []string{
 			"git -c init.defaultBranch=nonExistentBranchBB0FOFCH32 init --bare $TMPDIR/test%2Frepo.git",
@@ -127,9 +127,14 @@ func TestIndex(t *testing.T) {
 				RepoID:   123,
 			},
 		},
-		wantArchive: []string{
-			"zoekt-archive-index -name test/repo -commit deadbeef -branch HEAD -disable_ctags http://api.test/.internal/git/test/repo/tar/deadbeef",
-		},
+		wantArchive: []string{strings.Join([]string{
+			"zoekt-archive-index",
+			"-name", "test/repo",
+			"-commit", "deadbeef",
+			"-branch", "HEAD",
+			"-repo_id", "123",
+			"-raw_config", "{\"archived\":\"0\",\"fork\":\"0\",\"priority\":\"0\",\"public\":\"0\",\"repoid\":\"123\"}",
+			"-disable_ctags", "http://api.test/.internal/git/test/repo/tar/deadbeef"}, " ")},
 		wantGit: []string{
 			"git -c init.defaultBranch=nonExistentBranchBB0FOFCH32 init --bare $TMPDIR/test%2Frepo.git",
 			"git -C $TMPDIR/test%2Frepo.git -c protocol.version=2 fetch --depth=1 http://api.test/.internal/git/test/repo deadbeef",
@@ -166,6 +171,8 @@ func TestIndex(t *testing.T) {
 			"-name", "test/repo",
 			"-commit", "deadbeef",
 			"-branch", "HEAD",
+			"-repo_id", "0",
+			"-raw_config", "{\"archived\":\"0\",\"fork\":\"0\",\"priority\":\"0\",\"public\":\"0\",\"repoid\":\"0\"}",
 			"-download-limit-mbps", "1000",
 			"-file_limit", "123",
 			"-parallelism", "4",
