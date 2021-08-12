@@ -189,13 +189,6 @@ func archiveIndex(o *indexArgs, runCmd func(*exec.Cmd) error) error {
 		"-branch", o.Branches[0].Name,
 	}
 
-	// Even though we check for incremental in this process, we still pass it
-	// in just in case we regress in how we check in process. We will still
-	// notice thanks to metrics and increased load on gitserver.
-	if o.Incremental {
-		args = append(args, "-incremental")
-	}
-
 	if o.DownloadLimitMBPS != "" {
 		args = append(args, "-download-limit-mbps", o.DownloadLimitMBPS)
 	}
@@ -296,13 +289,6 @@ func gitIndex(o *indexArgs, runCmd func(*exec.Cmd) error) error {
 
 	args := []string{
 		"-submodules=false",
-	}
-
-	// Even though we check for incremental in this process, we still pass it
-	// in just in case we regress in how we check in process. We will still
-	// notice thanks to metrics and increased load on gitserver.
-	if o.Incremental {
-		args = append(args, "-incremental")
 	}
 
 	var branches []string

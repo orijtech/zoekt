@@ -166,7 +166,6 @@ func TestIndex(t *testing.T) {
 			"-name", "test/repo",
 			"-commit", "deadbeef",
 			"-branch", "HEAD",
-			"-incremental",
 			"-download-limit-mbps", "1000",
 			"-file_limit", "123",
 			"-parallelism", "4",
@@ -187,7 +186,7 @@ func TestIndex(t *testing.T) {
 			"git -C $TMPDIR/test%2Frepo.git config zoekt.priority 0",
 			"git -C $TMPDIR/test%2Frepo.git config zoekt.public 0",
 			"git -C $TMPDIR/test%2Frepo.git config zoekt.repoid 0",
-			"zoekt-git-index -submodules=false -incremental -branches HEAD,dev " +
+			"zoekt-git-index -submodules=false -branches HEAD,dev " +
 				"-file_limit 123 -parallelism 4 -index /data/index -require_ctags -large_file foo -large_file bar " +
 				"$TMPDIR/test%2Frepo.git",
 		},
