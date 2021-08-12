@@ -8,6 +8,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -206,6 +207,9 @@ func main() {
 		strip  = flag.Int("strip_components", 0, "Remove the specified number of leading path elements. Pathnames with fewer elements will be silently skipped.")
 
 		downloadLimitMbps = flag.Int64("download-limit-mbps", 0, "If non-zero, limit archive downloads to specified amount in megabits per second")
+
+		repoID       = flag.Int("repo_id", 0, "The repository ID")
+		rawConfigStr = flag.String("raw_config", "", "a JSON object. The content of raw_config is stored in the index metadata.")
 	)
 	flag.Parse()
 
@@ -219,6 +223,18 @@ func main() {
 	}
 	archive := flag.Args()[0]
 	bopts := cmd.OptionsFromFlags()
+	bopts.RepositoryDescription.ID = uint32(*repoID)
+
+	var rawConfig map[string]string
+	if *rawConfigStr != "" {
+		rawConfig = make(map[string]string)
+		err := json.Unmarshal([]byte(*rawConfigStr), &rawConfig)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	bopts.RepositoryDescription.RawConfig = rawConfig
+
 	opts := Options{
 		Incremental: *incremental,
 

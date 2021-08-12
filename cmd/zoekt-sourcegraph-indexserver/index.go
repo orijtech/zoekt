@@ -182,18 +182,26 @@ func archiveIndex(o *indexArgs, runCmd func(*exec.Cmd) error) error {
 		return fmt.Errorf("zoekt-archive-index only supports 1 branch, got %v", o.Branches)
 	}
 
+	bo := o.BuildOptions()
+	b, err := json.Marshal(bo.RepositoryDescription.RawConfig)
+	if err != nil {
+		return err
+	}
+
 	commit := o.Branches[0].Version
 	args := []string{
 		"-name", o.Name,
 		"-commit", commit,
 		"-branch", o.Branches[0].Name,
+		"-repo_id", fmt.Sprintf("%d", o.RepoID),
+		"-raw_config", string(b),
 	}
 
 	if o.DownloadLimitMBPS != "" {
 		args = append(args, "-download-limit-mbps", o.DownloadLimitMBPS)
 	}
 
-	args = append(args, o.BuildOptions().Args()...)
+	args = append(args, bo.Args()...)
 
 	args = append(args, o.Root.ResolveReference(&url.URL{Path: fmt.Sprintf("/.internal/git/%s/tar/%s", o.Name, commit)}).String())
 

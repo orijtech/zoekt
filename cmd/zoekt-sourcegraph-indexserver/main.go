@@ -458,9 +458,10 @@ func (s *Server) Index(args *indexArgs) (state indexState, err error) {
 	if len(args.Branches) == 0 {
 		return indexStateEmpty, s.createEmptyShard(tr, args.Name)
 	}
-	bo := args.BuildOptions()
-	bo.SetDefaults()
+
 	if args.Incremental {
+		bo := args.BuildOptions()
+		bo.SetDefaults()
 		incrementalState := bo.IndexState()
 		metricIndexIncrementalIndexState.WithLabelValues(string(incrementalState)).Inc()
 		switch incrementalState {
@@ -493,12 +494,7 @@ func (s *Server) Index(args *indexArgs) (state indexState, err error) {
 		f = archiveIndex
 	}
 	metricIndexingTotal.Inc()
-
-	err = f(args, runCmd)
-	if err != nil {
-		return indexStateSuccess, err
-	}
-	return indexStateSuccess, bo.WriteMetaFilesForNewShards()
+	return indexStateSuccess, f(args, runCmd)
 }
 
 func (s *Server) defaultArgs() *indexArgs {

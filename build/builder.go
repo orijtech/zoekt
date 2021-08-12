@@ -18,7 +18,6 @@ package build
 
 import (
 	"crypto/sha1"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -337,27 +336,6 @@ func (o *Options) IgnoreSizeMax(name string) bool {
 	}
 
 	return false
-}
-
-func (o *Options) WriteMetaFilesForNewShards() error {
-	i := 0
-	for {
-		fn := o.ShardName(i)
-		_, err := os.Stat(fn)
-		if os.IsNotExist(err) {
-			break
-		}
-		tmp, err := JsonMarshalTmpFile(o.RepositoryDescription, fn+".meta")
-		if err != nil {
-			return err
-		}
-		err = os.Rename(tmp, fn+".meta")
-		if err != nil {
-			return err
-		}
-		i++
-	}
-	return nil
 }
 
 // NewBuilder creates a new Builder instance.
@@ -734,35 +712,3 @@ func (b *Builder) writeShard(fn string, ib *zoekt.IndexBuilder) (*finishedShard,
 
 // umask holds the Umask of the current process
 var umask os.FileMode
-
-// jsonMarshalFileTmp marshals v to the temporary file p + ".*.tmp" and
-// returns the file name.
-//
-// Note: .tmp is the same suffix used by Builder. indexserver knows to clean
-// them up.
-func JsonMarshalTmpFile(v interface{}, p string) (_ string, err error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return "", err
-	}
-
-	f, err := ioutil.TempFile(filepath.Dir(p), filepath.Base(p)+".*.tmp")
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		f.Close()
-		if err != nil {
-			_ = os.Remove(f.Name())
-		}
-	}()
-
-	if err := f.Chmod(0o666 &^ umask); err != nil {
-		return "", err
-	}
-	if _, err := f.Write(b); err != nil {
-		return "", err
-	}
-
-	return f.Name(), f.Close()
-}
