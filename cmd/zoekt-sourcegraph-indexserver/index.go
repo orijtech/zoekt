@@ -193,7 +193,6 @@ func archiveIndex(o *indexArgs, runCmd func(*exec.Cmd) error) error {
 		"-name", o.Name,
 		"-commit", commit,
 		"-branch", o.Branches[0].Name,
-		"-repo_id", fmt.Sprintf("%d", o.RepoID),
 		"-raw_config", string(b),
 	}
 

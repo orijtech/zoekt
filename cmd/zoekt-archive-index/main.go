@@ -16,6 +16,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/google/zoekt"
@@ -208,7 +209,6 @@ func main() {
 
 		downloadLimitMbps = flag.Int64("download-limit-mbps", 0, "If non-zero, limit archive downloads to specified amount in megabits per second")
 
-		repoID       = flag.Int("repo_id", 0, "The repository ID")
 		rawConfigStr = flag.String("raw_config", "", "a JSON object. The content of raw_config is stored in the index metadata.")
 	)
 	flag.Parse()
@@ -223,7 +223,6 @@ func main() {
 	}
 	archive := flag.Args()[0]
 	bopts := cmd.OptionsFromFlags()
-	bopts.RepositoryDescription.ID = uint32(*repoID)
 
 	if *rawConfigStr != "" {
 		rawConfig := make(map[string]string)
@@ -232,6 +231,13 @@ func main() {
 			log.Fatal(err)
 		}
 		bopts.RepositoryDescription.RawConfig = rawConfig
+		if idStr, ok := rawConfig["repoid"]; ok {
+			id, err := strconv.Atoi(idStr)
+			if err != nil {
+				log.Fatal(err)
+			}
+			bopts.RepositoryDescription.ID = uint32(id)
+		}
 	}
 
 	opts := Options{
