@@ -225,15 +225,14 @@ func main() {
 	bopts := cmd.OptionsFromFlags()
 	bopts.RepositoryDescription.ID = uint32(*repoID)
 
-	var rawConfig map[string]string
 	if *rawConfigStr != "" {
-		rawConfig = make(map[string]string)
+		rawConfig := make(map[string]string)
 		err := json.Unmarshal([]byte(*rawConfigStr), &rawConfig)
 		if err != nil {
 			log.Fatal(err)
 		}
+		bopts.RepositoryDescription.RawConfig = rawConfig
 	}
-	bopts.RepositoryDescription.RawConfig = rawConfig
 
 	opts := Options{
 		Incremental: *incremental,
