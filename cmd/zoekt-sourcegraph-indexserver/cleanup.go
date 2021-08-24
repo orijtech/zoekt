@@ -13,6 +13,17 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+type IndexDir2 interface {
+	Find(name string) ([]Shard, error)
+	List() ([]Shard, error)
+}
+
+type Shard struct {
+	Path       string
+	Repos      []*zoekt.Repository
+	Tombstones []bool
+}
+
 // cleanup trashes shards in indexDir that do not exist in repos. For repos
 // that do not exist in indexDir, but do in indexDir/.trash it will move them
 // back into indexDir. Additionally it uses now to remove shards that have
@@ -25,6 +36,8 @@ func cleanup(indexDir string, repos []string, now time.Time) {
 
 	trash := getShards(trashDir)
 	index := getShards(indexDir)
+
+	//os.Remove if all(Tombstones)
 
 	// trash: Remove old shards and conflicts with index
 	minAge := now.Add(-24 * time.Hour)
@@ -47,6 +60,40 @@ func cleanup(indexDir string, repos []string, now time.Time) {
 		removeAll(shards...)
 		delete(trash, repo)
 	}
+
+	// sha: A -> B -> X -> C
+	//
+	// 1: A
+	// 2: A
+	//
+	// 1: B
+	// 2: RIP(A)
+	//
+	// 1: RIP(B)
+	// 2: RIP(A)
+	//
+	// 1: B
+	// 2: A
+
+	// sha: A -> B -> X -> C
+	//
+	// 1: A
+	// 2: A
+	//
+	// 1: B
+	//
+	// 1: RIP(B)
+	//
+	// 1: B
+
+	// 1: A
+	// 2: A
+	//
+	// c: A
+	// 1: RIP(A)
+	// 2: RIP(A)
+	//
+	//
 
 	// index: Move missing repos from trash into index
 	for _, repo := range repos {

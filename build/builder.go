@@ -469,6 +469,15 @@ func (b *Builder) Finish() error {
 		return b.buildError
 	}
 
+	// Find
+	name := b.opts.RepositoryDescription.Name
+
+	var index IndexDir2
+	shards, err := index.Find(name)
+	if err != nil {
+		// TODO
+	}
+
 	for tmp, final := range b.finishedShards {
 		if err := os.Rename(tmp, final); err != nil {
 			b.buildError = err
@@ -495,6 +504,16 @@ func (b *Builder) Finish() error {
 	}
 	b.finishedShards = map[string]string{}
 
+	for _, shard := range shards {
+		if len(shard.Repos) == 1 && shardNumber(shard.Path) < b.nextShardNum {
+			// skip the shards we just indexed
+			continue
+		}
+		if err := shard.Tombstone(name); err != nil {
+			// TODO
+		}
+	}
+
 	if b.nextShardNum > 0 {
 		if err := b.deleteRemainingShards(); err != nil {
 			log.Printf("failed to delete some old shards: %v", err)
@@ -502,6 +521,29 @@ func (b *Builder) Finish() error {
 	}
 	return b.buildError
 }
+
+type IndexDir interface {
+	// Find returns all shard paths which contain repo name. This includes
+	// shards where there repository is tombstoned.
+	Find(name string) ([]string, error)
+	// Tombstone
+	Tombstone(shard, name string) error
+	// Revive
+	Revive(shard, name string) error
+}
+
+type IndexDir2 interface {
+	Find(name string) ([]Shard, error)
+}
+
+type Shard struct {
+	Path       string
+	Repos      []*zoekt.Repository
+	Tombstones []bool
+}
+
+func (s *Shard) Tombstone(name string) error { return nil }
+func (s *Shard) Revive(name string) error    { return nil }
 
 func (b *Builder) deleteRemainingShards() error {
 	for {
@@ -522,6 +564,23 @@ func (b *Builder) deleteRemainingShards() error {
 			}
 		}
 		b.shardLog("remove", name)
+	}
+
+	name := b.opts.RepositoryDescription.Name
+
+	var index IndexDir2
+	shards, err := index.Find(name)
+	if err != nil {
+		// TODO
+	}
+	for _, shard := range shards {
+		if len(shard.Repos) == 1 && shardNumber(shard.Path) < b.nextShardNum {
+			// skip the shards we just indexed
+			continue
+		}
+		if err := shard.Tombstone(name); err != nil {
+			// TODO
+		}
 	}
 }
 
