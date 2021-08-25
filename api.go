@@ -16,6 +16,7 @@ package zoekt // import "github.com/google/zoekt"
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -274,6 +275,25 @@ type Repository struct {
 	// IndexMetadata. However, we store it here since the Sourcegraph frontend
 	// can read this structure but not IndexMetadata.
 	HasSymbols bool
+}
+
+func (r *Repository) HashRepository() string {
+	hashed := sha1.New()
+
+	hashed.Write([]byte(fmt.Sprintf("%d", r.ID)))
+	hashed.Write([]byte(r.Name))
+	hashed.Write([]byte(r.URL))
+	hashed.Write([]byte(fmt.Sprintf("%v", r.Branches)))
+	hashed.Write([]byte(fmt.Sprintf("%v", r.SubRepoMap)))
+	hashed.Write([]byte(r.CommitURLTemplate))
+	hashed.Write([]byte(r.FileURLTemplate))
+	hashed.Write([]byte(r.LineFragmentTemplate))
+	hashed.Write([]byte(fmt.Sprintf("%v", r.RawConfig)))
+	hashed.Write([]byte(fmt.Sprintf("%v", r.Rank)))
+	hashed.Write([]byte(fmt.Sprintf("%v", r.IndexOptions)))
+	hashed.Write([]byte(fmt.Sprintf("%v", r.HasSymbols)))
+
+	return fmt.Sprintf("%x", hashed.Sum(nil))
 }
 
 func (r *Repository) UnmarshalJSON(data []byte) error {

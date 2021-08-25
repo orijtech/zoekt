@@ -24,6 +24,17 @@ type Shard struct {
 	Tombstones []bool
 }
 
+// Finder returns the shards containing the alive repo "name".
+// CR Stefan for Keegan: We could use this for revival and for incremental indexing.
+type Finder interface {
+	Find(name string) ([]shard, error)
+}
+
+type shard struct {
+	path string
+	repo int16 // repo index
+}
+
 // cleanup trashes shards in indexDir that do not exist in repos. For repos
 // that do not exist in indexDir, but do in indexDir/.trash it will move them
 // back into indexDir. Additionally it uses now to remove shards that have
@@ -94,6 +105,22 @@ func cleanup(indexDir string, repos []string, now time.Time) {
 	// 2: RIP(A)
 	//
 	//
+
+	// CR Stefan for Keegan: Maybe cleanup shouldn't revive shards? IndexState() checks alive repos and falls back to check
+	// tombstones to revive.
+
+	// CR Stefan for Keegan: Let's add an oracle just for ALIVE shards?
+	// oracle(repoName) -> [path1, path2]
+
+	// CR Stefan for Keegan: Only keep track of the latest tombstone, and
+	// only if there is no alive repo anymore IE alive repos don't have tombstones.
+	// Effectively this means there are 2 places where we have to do bookkeeping
+	// (1) Add a (tracked) tombstone if we drop repos based on input from frontend
+	// (2) Remove a (tracked) tombstone in Cleanup if we revive a repo or if we delete a shard which contained a tracked tombstone.
+	//
+	// Tracked tombstones can live in 1 central file
+	//
+	// name path ix
 
 	// index: Move missing repos from trash into index
 	for _, repo := range repos {
