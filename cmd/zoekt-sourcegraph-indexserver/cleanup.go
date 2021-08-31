@@ -14,6 +14,8 @@ import (
 )
 
 type IndexDir2 interface {
+	// Find returns all shard paths which contain repo name. This includes
+	// shards where there repository is tombstoned.
 	Find(name string) ([]Shard, error)
 	List() ([]Shard, error)
 }
@@ -24,15 +26,179 @@ type Shard struct {
 	Tombstones []bool
 }
 
-// Finder returns the shards containing the alive repo "name".
 // CR Stefan for Keegan: We could use this for revival and for incremental indexing.
-type Finder interface {
+type Finder3 interface {
+	// Find returns the shards containing the alive repo "name".
 	Find(name string) ([]shard, error)
+	// Revive removes the tombstones for repo "name" if they exist. If they do
+	// ok is true.
+	Revive(name string) (ok bool, _ error)
+
+	// TODO
+	List() ([]string, error)
+
+	Tombstone(name string) error
 }
 
 type shard struct {
 	path string
 	repo int16 // repo index
+}
+
+// Old
+// trash: Remove old shards
+// trash: conflicts with index
+// index: Move missing repos from trash into index
+// index: Move non-existant repos into trash
+// Remove old .tmp files from crashed indexer runs
+
+// New
+// trash: Remove old shards -> remove old fully tombstoned shards
+// trash: conflicts with index -> best effort, skip tombstoned if alive or tombstone is removed
+// index: Move missing repos from trash into index -> call revive before any index operation
+// index: Move non-existant repos into trash -> tombstone unused repos
+// Remove old .tmp files from crashed indexer runs -> same
+
+// tombstone, deleteRemainingShards
+
+
+func tombstoneUnused(finder Finder3) error {}
+func (finder Finder3) error {}
+func tombstoneUnused(finder Finder3) error {}
+
+// cleanup trashes shards in indexDir that do not exist in repos. For repos
+// that do not exist in indexDir, but do in indexDir/.trash it will move them
+// back into indexDir. Additionally it uses now to remove shards that have
+// been in the trash for 24 hours. It also deletes .tmp files older than 4 hours.
+func cleanup(finder Finder3, indexDir string, repos []string, now time.Time) {
+	trashDir := filepath.Join(indexDir, ".trash")
+	if err := os.MkdirAll(trashDir, 0755); err != nil {
+		log.Printf("failed to create trash dir: %v", err)
+	}
+
+	trash := getShards(trashDir)
+	index := getShards(indexDir)
+
+	//os.Remove if all(Tombstones)
+
+	// trash: Remove old shards and conflicts with index
+	minAge := now.Add(-24 * time.Hour)
+	for repo, shards := range trash {
+		old := false
+		for _, shard := range shards {
+			if shard.ModTime.Before(minAge) {
+				old = true
+			} else if shard.ModTime.After(now) {
+				debug.Printf("trashed shard %s has timestamp in the future, reseting to now", shard.Path)
+				_ = os.Chtimes(shard.Path, now, now)
+			}
+		}
+
+		if _, conflicts := index[repo]; !conflicts && !old {
+			continue
+		}
+
+		log.Printf("removing old shards from trash for %s", repo)
+		removeAll(shards...)
+		delete(trash, repo)
+	}
+
+	// sha: A -> B -> X -> C
+	//
+	// 1: A
+	// 2: A
+	//
+	// 1: B
+	// 2: RIP(A)
+	//
+	// 1: RIP(B)
+	// 2: RIP(A)
+	//
+	// 1: B
+	// 2: A
+
+	// sha: A -> B -> X -> C
+	//
+	// 1: A
+	// 2: A
+	//
+	// 1: B
+	//
+	// 1: RIP(B)
+	//
+	// 1: B
+
+	// 1: A
+	// 2: A
+	//
+	// c: A
+	// 1: RIP(A)
+	// 2: RIP(A)
+	//
+	//
+
+	// CR Stefan for Keegan: Maybe cleanup shouldn't revive shards? IndexState() checks alive repos and falls back to check
+	// tombstones to revive.
+
+	// CR Stefan for Keegan: Let's add an oracle just for ALIVE shards?
+	// oracle(repoName) -> [path1, path2]
+
+	// CR Stefan for Keegan: Only keep track of the latest tombstone, and
+	// only if there is no alive repo anymore IE alive repos don't have tombstones.
+	// Effectively this means there are 2 places where we have to do bookkeeping
+	// (1) Add a (tracked) tombstone if we drop repos based on input from frontend
+	// (2) Remove a (tracked) tombstone in Cleanup if we revive a repo or if we delete a shard which contained a tracked tombstone.
+	//
+	// Tracked tombstones can live in 1 central file
+	//
+	// name path ix
+
+	// index: Move missing repos from trash into index
+	for _, repo := range repos {
+		// Delete from index so that index will only contain shards to be
+		// trashed.
+		delete(index, repo)
+
+		shards, ok := trash[repo]
+		if !ok {
+			continue
+		}
+
+		log.Printf("restoring shards from trash for %s", repo)
+		moveAll(indexDir, shards)
+		shardsLog(indexDir, "restore", shards)
+	}
+
+	// index: Move non-existant repos into trash
+	for _, shards := range index {
+		// Best-effort touch. If touch fails, we will just remove from the
+		// trash sooner.
+		for _, shard := range shards {
+			_ = os.Chtimes(shard.Path, now, now)
+		}
+
+		moveAll(trashDir, shards)
+		shardsLog(indexDir, "remove", shards)
+	}
+
+	// Remove old .tmp files from crashed indexer runs-- for example, if
+	// an indexer OOMs, it will leave around .tmp files, usually in a loop.
+	maxAge := now.Add(-4 * time.Hour)
+	if failures, err := filepath.Glob(filepath.Join(indexDir, "*.tmp")); err != nil {
+		log.Printf("Glob: %v", err)
+	} else {
+		for _, f := range failures {
+			st, err := os.Stat(f)
+			if err != nil {
+				log.Printf("Stat(%q): %v", f, err)
+				continue
+			}
+			if !st.IsDir() && st.ModTime().Before(maxAge) {
+				log.Printf("removing old tmp file: %s", f)
+				os.Remove(f)
+			}
+		}
+	}
 }
 
 // cleanup trashes shards in indexDir that do not exist in repos. For repos
